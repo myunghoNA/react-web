@@ -1,0 +1,52 @@
+name: Deploy React Web to Demo # 워크플로우 이름
+
+on:
+  push:
+    branches:
+      - main # main 브랜치에 코드가 푸시될 때마다 워크플로우 실행
+  workflow_dispatch: # 수동으로도 워크플로우를 실행할 수 있게 함
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest # 이 작업은 최신 Ubuntu 환경에서 실행될 거야
+
+    steps:
+      - name: Checkout Code # GitHub 저장소의 코드를 워크플로우 환경으로 가져옴
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js # React 앱 빌드를 위해 Node.js 환경 설정
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20" # 사용할 Node.js 버전 (유저님의 로컬 버전과 맞춰도 좋음)
+
+      - name: Install Dependencies # React 앱 의존성 설치
+        run: npm install
+
+      - name: Build React App # React 앱 빌드 (배포할 정적 파일 생성)
+        run: npm run build # Vite 기준으로 'dist' 폴더가 생성될 거야
+
+      - name: SSH to Server and Deploy # 서버에 SSH로 접속하여 배포
+        uses: appleboy/ssh-action@master # SSH 접속 및 명령 실행을 도와주는 GitHub Action
+        with:
+          host: 192.168.216.4 # 유저님 리눅스 서버 IP 주소
+          username: nmh # 서버 사용자 이름
+          key: ${{ secrets.SSH_PRIVATE_KEY }} # GitHub Secret에 등록한 SSH 개인 키
+          port: 22 # SSH 포트 (기본값)
+          script: |
+            # 서버 접속 후 실행될 명령어들
+            # 1. 이전 빌드 파일 삭제 (선택 사항: 안정성을 위해 보통 삭제 후 새로 업로드)
+            # rm -rf /home/nmh/react-web/* 
+
+            # 2. 로컬에서 빌드된 파일들을 서버의 배포 경로로 복사 (이 부분이 중요!)
+            # rsync는 변경된 파일만 효율적으로 복사. rsync가 없으면 scp 대체 가능.
+            # /github/workspace/dist/ 는 GitHub Actions 환경에서 'npm run build' 결과물이 있는 경로
+            rsync -avz --delete /github/workspace/dist/ /home/nmh/react-web/
+
+            # (만약 rsync가 서버에 설치되어 있지 않다면 scp를 사용해야 함)
+            # mkdir -p /tmp/deploy && scp -r -i /path/to/key /github/workspace/dist/* nmh@192.168.216.4:/tmp/deploy/
+            # mv /tmp/deploy/* /home/nmh/react-web/ && rm -rf /tmp/deploy/
+            # 이런 식으로 더 복잡해짐. 가능하면 rsync 설치 추천! (sudo apt install rsync)
+
+            # 3. Nginx 서비스 재시작 또는 reload (새로운 파일이 서비스되도록)
+            sudo systemctl reload nginx
+            # sudo systemctl restart nginx # reload가 안 될 경우 restart 시도
